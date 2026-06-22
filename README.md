@@ -192,6 +192,30 @@ Optional: validate your runtime Unbound config against the staged source binary 
 ./scripts/build-unbound.sh ./ke-net-screen-build --with-pihole-conf-check
 ```
 
+#### APT package cache (faster repeat builds)
+
+Pass `--apt-cache` to enable a host-side APT package cache. The cache lives in
+`apt-cache/` in the project directory (excluded from git, like the source-Unbound
+build directory) and is handed to rpi-image-gen via `IGconf_sys_apt_cachedir`:
+
+```bash
+./ke-net-screen.sh --source-unbound --apt-cache --build-only
+```
+
+The first run populates the cache; subsequent runs retrieve packages from it when
+the repository metadata allows. You will still see `I: running apt-get update...`,
+but `I: downloading packages with apt...` should pass quickly or be skipped.
+
+If a cache already exists when you start an **interactive** run with `--apt-cache`,
+the script prompts before building:
+
+- `[K] Keep` — reuse the existing cache (default; also used for non-interactive runs).
+- `[R] Refresh` — empty the cache, then repopulate it during this build.
+- `[D] Delete` — remove the cache directory and build without a cache this run.
+
+> Requires an rpi-image-gen that supports `IGconf_sys_apt_cachedir` (the
+> `sys: implement apt package cache` change in the `rpi-image-gen` submodule).
+
 #### Success Criteria
 
 When source mode is enabled, all of the following should be true:

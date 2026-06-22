@@ -37,6 +37,8 @@ ENV_FILE="$PROJECT_ROOT/.env"
 BUILD_ONLY=0
 PREFLIGHT_ONLY=0
 UNBOUND_SOURCE=0
+APT_CACHE=0
+APT_CACHE_DIR="$SCRIPT_DIR/apt-cache"
 MIN_FREE_MB=12288
 
 resolve_build_user_pubkey() {
@@ -82,8 +84,62 @@ Options:
   --source-unbound  Build Unbound from source (vendors/unbound) before
                     assembling the image.  Requires the vendors/unbound
                     submodule and libssl-dev + libexpat1-dev.
+  --apt-cache       Enable a host-side APT package cache in the project
+                    directory (apt-cache/) to speed up repeat builds.
+                    Passes IGconf_sys_apt_cachedir to rpi-image-gen.
   --help            Show this help text.
 EOF
+}
+
+force_rm() {
+  # Remove a path that may contain files owned by build subuids (created by the
+  # rootless mmdebstrap build).  Try a plain removal, then a user-namespace
+  # removal, and finally sudo.
+  local target="$1"
+  rm -rf "$target" 2>/dev/null && return 0
+  if command -v podman >/dev/null 2>&1 && podman unshare rm -rf "$target" 2>/dev/null; then
+    return 0
+  fi
+  sudo rm -rf "$target"
+}
+
+# When the APT cache is enabled and already present, give an interactive user the
+# chance to refresh or delete it before the build starts.  Non-interactive runs
+# (CI, background builds) silently reuse the existing cache.
+manage_existing_apt_cache() {
+  if [[ $APT_CACHE -ne 1 || ! -d "$APT_CACHE_DIR" ]]; then
+    return 0
+  fi
+
+  local size
+  size=$(du -sh "$APT_CACHE_DIR" 2>/dev/null | cut -f1)
+
+  if [[ ! -t 0 ]]; then
+    echo "[apt-cache] Existing cache detected at $APT_CACHE_DIR (${size:-unknown}); reusing (non-interactive)."
+    return 0
+  fi
+
+  echo "[apt-cache] Existing APT package cache detected at $APT_CACHE_DIR (${size:-unknown})."
+  echo "  [K] Keep and reuse it          (default)"
+  echo "  [R] Refresh - empty it, then repopulate during this build"
+  echo "  [D] Delete it and build without a cache this run"
+  local choice=""
+  read -r -p "Choose [K/r/d]: " choice || choice=""
+  case "${choice,,}" in
+    r|refresh)
+      echo "[apt-cache] Refreshing cache (clearing contents)..."
+      force_rm "$APT_CACHE_DIR"
+      mkdir -p "$APT_CACHE_DIR"
+      ;;
+    d|delete)
+      echo "[apt-cache] Deleting cache; this run will build without a cache."
+      force_rm "$APT_CACHE_DIR"
+      APT_CACHE=0
+      ;;
+    *)
+      echo "[apt-cache] Keeping existing cache."
+      ;;
+  esac
 }
 
 while [[ $# -gt 0 ]]; do
@@ -98,6 +154,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --source-unbound)
       UNBOUND_SOURCE=1
+      shift
+      ;;
+    --apt-cache)
+      APT_CACHE=1
       shift
       ;;
     --help|-h)
@@ -181,6 +241,10 @@ if [[ $PREFLIGHT_ONLY -eq 1 ]]; then
   echo "Preflight checks passed."
   exit 0
 fi
+
+# Detect a pre-existing APT cache and, when interactive, let the user refresh or
+# delete it before the run commences.
+manage_existing_apt_cache
 
 # Tell user to insert the SD card and warn it will be erased
 # read -p "Insert the SD card before continuing...it will be erased!"
@@ -308,10 +372,20 @@ else
   echo "[unbound-source] Source mode disabled; image will use package-managed unbound (default)."
 fi
 
-# apt_cachedir="$SCRIPT_DIR/apt-cache"
-# mkdir -p "$apt_cachedir"
+# Optional host-side APT package cache. Lives in the project directory so it
+# persists across builds (it is excluded from git, like the Unbound build dir)
+# and is handed to rpi-image-gen via IGconf_sys_apt_cachedir.
+BUILD_ARGS=()
+if [[ $APT_CACHE -eq 1 ]]; then
+  mkdir -p "$APT_CACHE_DIR"
+  echo "[apt-cache] Using host-side APT package cache at $APT_CACHE_DIR"
+  BUILD_ARGS+=(-- "IGconf_sys_apt_cachedir=$APT_CACHE_DIR")
+else
+  echo "[apt-cache] Cache disabled; packages will be downloaded fresh (pass --apt-cache to enable)."
+fi
+
 # Execute with the options file
-./rpi-image-gen build -S "$SCRIPT_DIR" -c "$LAYER_CONFIG" -B "$OUTDIR"
+./rpi-image-gen build -S "$SCRIPT_DIR" -c "$LAYER_CONFIG" -B "$OUTDIR" "${BUILD_ARGS[@]}"
 # skip invoking syft
 # ./rpi-image-gen build -S "$SCRIPT_DIR" -c "$LAYER_CONFIG" -B "$OUTDIR" -- IGconf_sbom_enable=n
 

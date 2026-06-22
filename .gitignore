@@ -4,5 +4,7 @@ ke-net-screen-build*
 .env.production
 .env.development
 .unbound-build/
+apt-cache/
+build.log
 .github/prompts/*
 private/*
