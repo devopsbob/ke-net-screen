@@ -111,8 +111,10 @@ manage_existing_apt_cache() {
     return 0
   fi
 
-  local size
-  size=$(du -sh "$APT_CACHE_DIR" 2>/dev/null | cut -f1)
+  # Tolerate du failing (e.g. cache subdirs owned by build subuids are
+  # unreadable); never let the size probe abort the script under set -e/pipefail.
+  local size=""
+  size=$(du -sh "$APT_CACHE_DIR" 2>/dev/null | cut -f1) || true
 
   if [[ ! -t 0 ]]; then
     echo "[apt-cache] Existing cache detected at $APT_CACHE_DIR (${size:-unknown}); reusing (non-interactive)."
