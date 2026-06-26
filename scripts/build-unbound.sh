@@ -165,7 +165,31 @@ mkdir -p "$BUILD_CACHE"
 if [[ $reconfigure -eq 1 ]]; then
   echo "==> Configuring..."
   cd "$BUILD_CACHE"
-  "$VENDOR_SRC/configure" \
+
+  # Binary hardening flags.
+  #
+  # A plain ./configure does NOT apply the toolchain hardening that Debian's
+  # packaged unbound gets from dpkg-buildflags, so a source build would ship a
+  # less-hardened binary than the distro package it replaces. We pass the same
+  # mitigations explicitly so the source-built unbound is at least as hardened:
+  #
+  #   -fstack-protector-strong  Stack canaries on functions with stack buffers /
+  #                             local arrays / address-taken locals; detects
+  #                             stack-smashing overflows at runtime.
+  #   -D_FORTIFY_SOURCE=2       Compile-time + runtime bounds checks on common
+  #                             libc calls (memcpy, sprintf, ...). Needs -O>=1.
+  #   -O2                       Required for _FORTIFY_SOURCE to take effect, and
+  #                             matches the project's normal optimization level.
+  #   -Wl,-z,relro,-z,now       Full RELRO: map the GOT read-only after startup
+  #                             (-z relro) and resolve all symbols eagerly at
+  #                             load (-z now), closing GOT-overwrite attacks.
+  #                             Without -z now this is only Partial RELRO.
+  #
+  # PIE is already the Debian/arm64 toolchain default, so it needs no flag here.
+  HARDEN_CFLAGS="-O2 -fstack-protector-strong -D_FORTIFY_SOURCE=2"
+  HARDEN_LDFLAGS="-Wl,-z,relro,-z,now"
+
+  CFLAGS="$HARDEN_CFLAGS" LDFLAGS="$HARDEN_LDFLAGS" "$VENDOR_SRC/configure" \
     --prefix=/usr \
     --sysconfdir=/etc \
     --disable-static \
