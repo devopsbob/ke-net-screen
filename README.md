@@ -59,7 +59,7 @@ flowchart TD
 
 AdBlock and Privacy Stripped Recursive DNS Resolver image builder using rpi-image-gen, pi-hole, unbound. Additional configuration of Avahi-daemon for local services discovery such as screen cast, printers, other '.local' services.
 
-**Repository:** devopsbob/ke-net-screen
+**Repository:** kranson-enterprises/ke-net-screen
 **Purpose:** Custom Raspberry Pi image builder combining rpi-image-gen with Pi-hole, Unbound, and Avahi-daemon for a local DNS and media server.
 
 The MIT license in this repository applies to the original ke-net-screen code and documentation; bundled submodules and other third-party components remain under their own licenses.
