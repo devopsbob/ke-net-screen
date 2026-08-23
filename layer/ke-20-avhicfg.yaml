@@ -59,7 +59,7 @@ mmdebstrap:
       [Unit]
       Description=DNS stack health check
       Wants=network-online.target
-      After=network-online.target pihole-FTL.service unbound.service avahi-daemon.service systemd-resolved.service
+      After=network-online.target run-pihole-firstboot.service pihole-FTL.service unbound.service avahi-daemon.service systemd-resolved.service
 
       [Service]
       Type=oneshot

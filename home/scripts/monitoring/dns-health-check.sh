@@ -61,14 +61,16 @@ check_sysctl_min() {
 }
 
 check_cpu_governor() {
+    # The image boots with cpufreq.default_governor=schedutil (cmdline.txt).
+    local expected="schedutil"
     local total=0
-    local perf=0
+    local matching=0
 
     for governor_file in /sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_governor; do
         [[ -r "$governor_file" ]] || continue
         total=$((total + 1))
-        if grep -q '^performance$' "$governor_file"; then
-            perf=$((perf + 1))
+        if grep -q "^${expected}\$" "$governor_file"; then
+            matching=$((matching + 1))
         fi
     done
 
@@ -77,10 +79,10 @@ check_cpu_governor() {
         return 0
     fi
 
-    if [[ $perf -eq $total ]]; then
-        log_message "✓ CPU governors in performance mode ($perf/$total)"
+    if [[ $matching -eq $total ]]; then
+        log_message "✓ CPU governors in $expected mode ($matching/$total)"
     else
-        log_message "⚠ CPU governors in performance mode ($perf/$total)"
+        log_message "⚠ CPU governors in $expected mode ($matching/$total)"
     fi
 }
 
@@ -90,9 +92,11 @@ check_unbound_cache_stats() {
         return 0
     fi
 
-    local hits misses
-    hits=$(unbound-control stats_noreset 2>/dev/null | awk -F= '/^total\.cachehits=/{print $2; exit}')
-    misses=$(unbound-control stats_noreset 2>/dev/null | awk -F= '/^total\.cachemiss=/{print $2; exit}')
+    # Unbound emits these as total.num.cachehits / total.num.cachemiss.
+    local stats hits misses
+    stats=$(unbound-control stats_noreset 2>/dev/null)
+    hits=$(awk -F= '/^total\.num\.cachehits=/{print $2; exit}' <<< "$stats")
+    misses=$(awk -F= '/^total\.num\.cachemiss=/{print $2; exit}' <<< "$stats")
 
     if [[ -n "$hits" && -n "$misses" ]]; then
         log_message "ℹ Unbound cache stats: hits=$hits misses=$misses"

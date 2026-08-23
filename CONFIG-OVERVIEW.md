@@ -100,7 +100,7 @@ unbound-control reload
 sysctl net.core.rmem_max net.core.wmem_max net.core.netdev_max_backlog
 
 # Review Unbound cache behavior
-unbound-control stats_noreset | grep -E 'total.cachehits|total.cachemiss'
+unbound-control stats_noreset | grep -E 'total\.num\.cachehits|total\.num\.cachemiss'
 
 # Check CPU governor state (expected: schedutil, set via cmdline.txt)
 grep -H . /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor 2>/dev/null
