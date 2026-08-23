@@ -40,22 +40,41 @@ mmdebstrap:
       echo "INFO: ke-unbsrccfg: installing Unbound artifacts from $STAGING_USR"
       install -d -m 0755 "$1/usr/sbin" "$1/usr/bin" "$1/usr/lib" "$1/usr/libexec"
 
+      # Register a local dpkg diversion before overwriting each binary so a
+      # later apt upgrade/reinstall of the unbound package (or a newly
+      # installed unbound-anchor/unbound-host) unpacks to <path>.distrib
+      # instead of silently replacing the source build.  --rename parks any
+      # package-owned file currently at the path; paths no package ships yet
+      # are diverted defensively.  The libunbound copies below need no
+      # diversion: Debian ships libunbound under /usr/lib/<multiarch>/,
+      # never /usr/lib/ itself.
+      ROOTFS="$1"
+      divert() {
+        chroot "$ROOTFS" dpkg-divert --local --rename --divert "$1.distrib" --add "$1"
+      }
+
       if [ -x "$STAGING_USR/sbin/unbound" ]; then
+        divert /usr/sbin/unbound
         cp -a "$STAGING_USR/sbin/unbound" "$1/usr/sbin/"
       fi
       if [ -x "$STAGING_USR/sbin/unbound-anchor" ]; then
+        divert /usr/sbin/unbound-anchor
         cp -a "$STAGING_USR/sbin/unbound-anchor" "$1/usr/sbin/"
       fi
       if [ -x "$STAGING_USR/sbin/unbound-checkconf" ]; then
+        divert /usr/sbin/unbound-checkconf
         cp -a "$STAGING_USR/sbin/unbound-checkconf" "$1/usr/sbin/"
       fi
       if [ -x "$STAGING_USR/sbin/unbound-control" ]; then
+        divert /usr/sbin/unbound-control
         cp -a "$STAGING_USR/sbin/unbound-control" "$1/usr/sbin/"
       fi
       if [ -x "$STAGING_USR/sbin/unbound-host" ]; then
+        divert /usr/sbin/unbound-host
         cp -a "$STAGING_USR/sbin/unbound-host" "$1/usr/sbin/"
       fi
       if [ -x "$STAGING_USR/sbin/unbound-control-setup" ]; then
+        divert /usr/sbin/unbound-control-setup
         cp -a "$STAGING_USR/sbin/unbound-control-setup" "$1/usr/sbin/"
       fi
 

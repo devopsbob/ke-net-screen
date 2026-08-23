@@ -363,7 +363,7 @@ if [[ -d "$OUTDIR" ]]; then
   done < <(mount | awk '{print $3}' | grep "^$OUTDIR" | sort -r || true)
 fi
 
-rm -Rf "$OUTDIR" 2>/dev/null || sudo rm -Rf "$OUTDIR"
+force_rm "$OUTDIR"
 mkdir -p "$OUTDIR"
 
 if [[ $UNBOUND_SOURCE -eq 1 ]]; then
@@ -408,6 +408,10 @@ if [[ $UNBOUND_SOURCE -eq 1 ]]; then
     exit 1
   fi
   echo "[unbound-source] Verified: source-built unbound present in rootfs at $ROOTFS_UNBOUND"
+
+  # syft records unbound from the dpkg DB (distro package version), not the
+  # source build that actually ships; rewrite the SBOM to match reality.
+  bash "$SCRIPT_DIR/scripts/patch-sbom-source-unbound.sh" "$OUTDIR"
 fi
 
 # sudo rpi-imager --cli "$OUTDIR/image-deb13-arm64-splash/deb13-arm64-splash.img" /dev/mmcblk0
