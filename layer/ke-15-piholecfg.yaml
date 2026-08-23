@@ -83,7 +83,7 @@ mmdebstrap:
       [Service]
       Type=oneshot
       ExecStart=/usr/local/sbin/run-pihole-firstboot.sh
-      AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_RAW_SOCKETS
+      AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW
 
       [Install]
       WantedBy=multi-user.target

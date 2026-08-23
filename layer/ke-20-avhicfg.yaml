@@ -48,7 +48,7 @@ mmdebstrap:
       </service-group>
       EOSHTTP
     - |
-      # Install DNS health checker and run it once after boot, then hourly.
+      # Install DNS health checker and run it once after boot, then daily.
       REPO_ROOT=${SRCROOT:?SRCROOT is required}
       install -d -m 0755 "$1/usr/local/bin"
       cp -a "$REPO_ROOT/home/scripts/monitoring/dns-health-check.sh" "$1/usr/local/bin/dns-health-check.sh" 2>/dev/null || true
@@ -71,7 +71,7 @@ mmdebstrap:
 
       cat > "$1/etc/systemd/system/dns-health-check.timer" <<'EOTMR'
       [Unit]
-      Description=Run DNS stack health checks every hour
+      Description=Run DNS stack health checks daily
 
       [Timer]
       OnBootSec=2min
