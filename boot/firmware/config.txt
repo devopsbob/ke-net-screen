@@ -42,6 +42,9 @@ disable_overscan=1
 # Disable Bluetooth
 dtoverlay=disable-bt
 
+# Disable Wi-Fi (wired-only appliance)
+dtoverlay=disable-wifi
+
 # Run as fast as firmware / board allows
 arm_boost=1
 

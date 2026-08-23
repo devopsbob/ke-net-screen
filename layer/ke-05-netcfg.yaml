@@ -163,5 +163,12 @@ mmdebstrap:
       After=network-online.target
       Wants=network-online.target
       EOSH
+    - |
+      # Wired-only appliance: Wi-Fi is disabled at the firmware level
+      # (dtoverlay=disable-wifi in config.txt), so drop the iwd wireless
+      # daemon that a base networking layer installs.
+      if chroot "$1" dpkg -s iwd >/dev/null 2>&1; then
+        chroot "$1" apt-get -y purge iwd
+      fi
       
 
