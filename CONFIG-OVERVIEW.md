@@ -35,8 +35,9 @@ DNS: 127.0.0.1 (local), 8.8.8.8, 9.9.9.9 (fallback)
 
 ### Security Considerations
 
-- SSH restricted to local network only
-- SSH allows password authentication but requires public-key authentication method in current policy
+- SSH restricted to local network only (ListenAddress bound to the static LAN IP)
+- SSH accepts both password and public-key authentication; key-only mode (`AuthenticationMethods publickey`) is present but commented in the policy pending debugging of remote-login issues — see "SSH Debugging Quick Reference" below
+- Unbound is source-built (1.26.x, hardened compile flags) and protected by local dpkg diversions so package upgrades cannot overwrite it
 - IPv6 disabled (not in use)
 - DNS-over-HTTPS/DNS-over-TLS not used; recursive resolution handled by local Unbound
 - Rate limiting enabled for Avahi
@@ -101,11 +102,48 @@ sysctl net.core.rmem_max net.core.wmem_max net.core.netdev_max_backlog
 # Review Unbound cache behavior
 unbound-control stats_noreset | grep -E 'total.cachehits|total.cachemiss'
 
-# Check CPU governor state
+# Check CPU governor state (expected: schedutil, set via cmdline.txt)
 grep -H . /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor 2>/dev/null
 ```
 
 ## Troubleshooting
+
+### SSH Debugging Quick Reference
+
+For validating remote login when testing a freshly flashed host:
+
+```bash
+# Effective server config as sshd actually resolved it (drop-ins included)
+sudo sshd -T | grep -Ei 'addressfamily|listenaddress|permitrootlogin|passwordauthentication|pubkeyauthentication|authenticationmethods|kbdinteractive'
+
+# Validate config syntax before restarting sshd
+sudo sshd -t
+
+# Confirm sshd is listening on the expected (static) address only
+ss -tlnp | grep ':22'
+
+# Watch auth attempts server-side while a client connects
+sudo journalctl -u ssh -f
+
+# Client side: verbose handshake shows which auth methods are offered/tried
+ssh -vv localadmin@192.168.0.53
+```
+
+Notes:
+
+- `ListenAddress` binds only the static LAN IP, and `ssh.service` waits for
+  `network-online.target` — if the address is wrong or the link is down, sshd
+  will be unreachable or fail to bind. Check `systemctl status ssh` and the
+  journal first.
+- Key logins require correct permissions on the target: `~/.ssh` 700,
+  `~/.ssh/authorized_keys` 600, home directory not group-writable.
+- The build injects the build user's `id_ed25519.pub` into `authorized_keys`
+  via `SSH_PUBKEY_USER1`; verify with `cat ~/.ssh/authorized_keys` on the host.
+- When re-testing key-only mode, uncomment `PubkeyAuthentication yes` and
+  `AuthenticationMethods publickey` in
+  `etc/ssh/sshd_config.d/local_network_only.conf` — and update the matching
+  assertions in `scripts/pre-release-check.sh`, which pins the current
+  commented state.
 
 ### Common Issues
 
@@ -117,8 +155,8 @@ grep -H . /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor 2>/dev/null
 
 ### Log Locations
 
-- Pi-hole: `/var/log/pihole.log`
-- Unbound: `/var/log/unbound/unbound.log`
+- Pi-hole (v6): `/var/log/pihole/pihole.log` and `/var/log/pihole/FTL.log`
+- Unbound: `journalctl -u unbound` (file logging disabled: `verbosity: 0`, no `logfile` configured)
 - Avahi: `journalctl -u avahi-daemon`
 - systemd-resolved: `journalctl -u systemd-resolved`
 

@@ -129,7 +129,7 @@ cp .env.example .env
 ./ke-net-screen.sh
 # Insert SD card when prompted
 # SD card gets erased!!
-# Wait 15-20 minutes for build completion
+# Wait ~15-20 minutes for build completion (hardware-dependent; often lower)
 # Image is copied onto SD card
 sudo shutdown now
 # Remove USB, reboot, it will run from the SD card
@@ -216,15 +216,37 @@ the script prompts before building:
 > Requires an rpi-image-gen that supports `IGconf_sys_apt_cachedir` (the
 > `sys: implement apt package cache` change in the `rpi-image-gen` submodule).
 
+#### Upgrade Protection and SBOM Accuracy
+
+Source mode registers local dpkg diversions for every Unbound binary it
+installs (`/usr/sbin/unbound`, `unbound-anchor`, `unbound-checkconf`,
+`unbound-control`, `unbound-control-setup`, `unbound-host`). The
+package-managed copies are parked at `<path>.distrib`, and any later
+`apt upgrade`/reinstall of the `unbound` package unpacks to `*.distrib`
+instead of overwriting the source-built binaries. To return a path to the
+distro binary later, remove its diversion with
+`dpkg-divert --remove --rename <path>`.
+
+Because dpkg still records the distro package version, the wrapper also
+rewrites the deploy SBOM after a source build
+(`scripts/patch-sbom-source-unbound.sh`): the `unbound` entry gets the real
+source version, a `git+` VCS reference to the exact built commit, corrected
+CPE/purl identifiers, and `deployed.json` is refreshed so the recorded
+size/sha1 of the SBOM still match.
+
 #### Success Criteria
 
 When source mode is enabled, all of the following should be true:
 
 1. Build log shows source mode execution:
    - `[unbound-source] Building Unbound from source before image assembly...`
-2. Build log confirms rootfs inclusion:
+2. Build log shows upgrade-protection diversions being registered:
+   - `Adding 'local diversion of /usr/sbin/unbound to /usr/sbin/unbound.distrib'`
+3. Build log confirms rootfs inclusion:
    - `[unbound-source] Verified: source-built unbound present in rootfs ...`
-3. Rootfs contains source-built binaries and library:
+4. Build log shows the SBOM correction:
+   - `[sbom-patch] patched 1 SBOM package entry`
+5. Rootfs contains source-built binaries and library:
 
 ```bash
 ./scripts/check-unbound-build.sh ./ke-net-screen-build
@@ -339,7 +361,7 @@ On the remote SSH host clone this repository. Update or reconfigure the submodul
 
 ```bash
 mkdir -p ~/source/github && cd ~/source/github
-git clone https://github.com/devopsbob/ke-net-screen.git
+git clone https://github.com/kranson-enterprises/ke-net-screen.git
 cd ke-net-screen
 ```
 
@@ -353,6 +375,9 @@ The `.gitmodules` file contains reference to the actual builder executables requ
 [submodule "vendors/pi-hole"]
  path = vendors/pi-hole
  url = https://github.com/pi-hole/pi-hole.git
+[submodule "vendors/unbound"]
+ path = vendors/unbound
+ url = https://github.com/NLnetLabs/unbound.git
 ```
 
 Make the submodule code available to the current repository:
@@ -446,41 +471,67 @@ You need to know your ISP default DNS. You are free to choose other DNS if your 
 
 #### Config Layer Update
 
-Now that you have found which public DNS serverd you will use you now update the main configuration file ./config/ke-net-screen.yaml.
+Now that you have found which public DNS servers you will use, set the values
+in `.env` (create it from `.env.example` if you have not already). The main
+configuration file `./config/ke-net-screen.yaml` does not hold literal
+values — it references environment variables that the build script loads from
+`.env`:
 
 ```yaml
-# ./config/ke-net-screen.yaml excerpt
+# ./config/ke-net-screen.yaml excerpt (env-driven; edit .env, not this file)
 network:
-  interface: eth0
-  use_dhcp: n
-  ipaddress: 192.168.0.53   # this will be the static IP for your DNS server
-  ipnetmask: 24
-  netmask: 255.255.255.0
-  gateway: 192.168.0.1      # this is router.
-  dns0: 127.0.0.1           # this is purposely 127.0.0.1 localhost for first-order.
-  dns1: 8.8.8.8             # this is second order lookup.
-  dns2: 9.9.9.9             # this is third order lookup.
-  domain: lan               # this is your local domain.
-                            # Do not use 'local'!! It is reserved for Avahi-Daemon.
-                            # It will be in /etc/networks for kernel lookups.
+  interface: $NETWORK_INTERFACE
+  use_dhcp: $NETWORK_USE_DHCP
+  ipaddress: $NETWORK_IPADDRESS
+  ipnetmask: $NETWORK_IPNETMASK
+  netmask: $NETWORK_NETMASK
+  gateway: $NETWORK_GATEWAY
+  dns0: $NETWORK_DNS0
+  dns1: $NETWORK_DNS1
+  dns2: $NETWORK_DNS2
+  domain: $NETWORK_DOMAIN
+```
+
+```bash
+# .env excerpt (example values)
+NETWORK_INTERFACE=eth0
+NETWORK_USE_DHCP=n
+NETWORK_IPADDRESS=192.168.0.53   # static IP for your new DNS server
+NETWORK_IPNETMASK=24
+NETWORK_NETMASK=255.255.255.0
+NETWORK_GATEWAY=192.168.0.1      # your router
+NETWORK_DNS0=127.0.0.1           # purposely localhost for first-order lookup
+NETWORK_DNS1=8.8.8.8             # second-order lookup
+NETWORK_DNS2=9.9.9.9             # third-order lookup
+NETWORK_DOMAIN=lan               # your local domain.
+                                 # Do not use 'local'!! It is reserved for
+                                 # Avahi-Daemon. It will be in /etc/networks
+                                 # for kernel lookups.
 ```
 
 #### Image Size
 
-The default image sizes work for most installations. It will not fill the entire SD disk. If you want to fill the entire SD disk you must also have enough space on the host USB key to create the image (as well as significantly more time). Once you feel comfortable and have tested your configuration you might go back and recreate the final image with larger sizes. See comments for example.
+The default image sizes work for most installations. Percentage sizes are relative to the built content (not the SD card), so the image will not fill the entire SD disk. If you want to fill the entire SD disk you must also have enough space on the host USB key to create the image (as well as significantly more time). Once you feel comfortable and have tested your configuration you might go back and recreate the final image with larger sizes. Like the network settings, sizes are set in `.env`:
 
 ```yaml
-# ./config/ke-net-screen.yaml excerpt
+# ./config/ke-net-screen.yaml excerpt (env-driven; edit .env, not this file)
 image:
   layer: image-rpios
-  boot_part_size: 300%
-  root_part_size: 200%
+  boot_part_size: $IMAGE_BOOT_PART_SIZE
+  root_part_size: $IMAGE_ROOT_PART_SIZE
   name: deb13-arm64-splash
-# compression=zstd
-# Partition sizes cause size increase to fill device, only needed on final prod deploy build
-# boot_part_size=512M
-# root_part_size=115G
 ```
+
+```bash
+# .env excerpt (example values)
+IMAGE_BOOT_PART_SIZE=200%
+IMAGE_ROOT_PART_SIZE=500%
+# Static sizes fill a specific device, only needed on final prod deploy build
+#IMAGE_BOOT_PART_SIZE=512M
+#IMAGE_ROOT_PART_SIZE=115G
+```
+
+Note: partitions are not expanded at first boot — the root filesystem keeps its build-time size until resized manually.
 
 ### 5. Build
 
@@ -500,6 +551,22 @@ The ./layer folder utilize META dependencies and variable expansion to feed the 
 ./layer/ke-15-piholecfg  # Stages and configures first boot install and configure pi-hole with unbound
 ./layer/ke-20-avhicfg    # Install and secure hardening of mDNS/AppleTalk/Avahi-daemon
 ```
+
+#### Image Tuning Highlights
+
+The layers and boot files bake in a few appliance-focused defaults:
+
+- CPU frequency scaling uses `schedutil` (`cpufreq.default_governor=` in
+  `boot/firmware/cmdline.txt`) for fast ramp on sporadic DNS bursts at
+  ondemand-class idle power.
+- Wi-Fi and Bluetooth are disabled at the firmware level
+  (`dtoverlay=disable-wifi`, `dtoverlay=disable-bt`) and the `iwd` wireless
+  daemon is removed from the image — this is a wired-only appliance.
+- Dirty writeback is bounded in bytes (`etc/sysctl.d/20-iodiskperf.conf`,
+  64 MiB hard / 16 MiB background) so write bursts cannot queue minutes of
+  SD-card flushing.
+- Kernel socket buffer limits (`etc/sysctl.d/99-unbound-tuning.conf`) match
+  Unbound's `so-rcvbuf`/`so-sndbuf` settings.
 
 #### Build With Password
 
@@ -561,8 +628,8 @@ You can have more than one DNS server on your network. It typically will not bre
 ```bash
 sudo ip addr show eth0          # Verify static IP assignment and interface status
 ss -tunlp                       # Confirm listening ports (53 for DNS, SSH on 22, etc.)
-cat /etc/nsswitch.conf          # Verify name resolution order (mdns, resolve, files)
-grep -v '#' /run/systemd/resolve/stub-resolv.conf  # Check systemd-resolved stub listener
+cat /etc/nsswitch.conf          # Verify the hosts lookup order (explained below)
+resolvectl status               # Confirm resolved forwards to Pi-hole (DNS: 127.0.0.1)
 resolvectl query example.com    # Test end-to-end resolution through the stack
 ```
 
@@ -575,25 +642,40 @@ This image deliberately does NOT include legacy networking components:
 | `/etc/network/interfaces` | **Absent** | Uses systemd-networkd instead (declarative, service-based configuration) |
 | `/etc/dhcp/dhclient.conf` | **Absent** | Static IP configured in systemd-networkd (no DHCP client needed) |
 | `/etc/mdns.allow` | **Absent** | Uses NSS mDNS through libnss-mdns (modern, no separate service config) |
-| `/etc/resolv.conf` | **Link to `/run/systemd/resolve/stub-resolv.conf`** | systemd-resolved manages DNS stub listener (centralized, dynamic) |
+| `/etc/resolv.conf` | **Link to `/run/systemd/resolve/stub-resolv.conf`** | Managed by systemd-resolved. Note: the stub listener itself is disabled (`DNSStubListener=no`) so Pi-hole can own port 53; glibc lookups go through nss-resolve, not this file. Tools that read resolv.conf directly (e.g. plain `dig`) should query `@127.0.0.1` explicitly |
 
 **Security and Best Practices:**
 
 - **No legacy ifupdown:** Removes obsolete networking stack and reduces attack surface
-- **systemd-resolved stub listener:** Centralized DNS interception at 127.0.0.53:53 (UNIX-only, no network exposure)
+- **systemd-resolved stub listener disabled:** `DNSStubListener=no` frees port 53 for Pi-hole; resolved itself forwards lookups to Pi-hole at 127.0.0.1 (see `/etc/systemd/resolved.conf.d/unbound.conf`)
 - **Pi-hole as primary DNS:** Runs on port 53, receives all queries via systemd-resolved delegation
 - **Unbound as upstream resolver:** Isolated on port 5335, only accessible from Pi-hole (defense-in-depth)
-- **NSS mDNS order:** `hosts dns mdns resolve` ensures local Avahi service discovery before network lookups
+- **NSS hosts order:** `mymachines resolve [!UNAVAIL=return] files myhostname mdns4_minimal [NOTFOUND=return] dns` — systemd-resolved first, with mDNS and classic DNS as guarded fallbacks (explained below)
 - **No embedded secrets:** Configuration uses environment variables, one-time boot secrets destroyed after use
+
+**How the NSS hosts order works** (`/etc/nsswitch.conf`, kept deliberately in this order):
+
+| Entry | Role |
+| --- | --- |
+| `mymachines` | Resolves local systemd-machined container/VM names; effectively a no-op on this appliance, kept for standard ordering |
+| `resolve [!UNAVAIL=return]` | systemd-resolved handles the lookup. The action `[!UNAVAIL=return]` means: if resolved is running, accept its answer — found *or* not found — and stop; entries after this are only consulted when resolved itself is unavailable |
+| `files` | `/etc/hosts` — fallback when resolved is not running |
+| `myhostname` | Guarantees the host's own name and `localhost` always resolve, even with everything else down |
+| `mdns4_minimal [NOTFOUND=return]` | Avahi IPv4 mDNS for `.local` names in the fallback path. `[NOTFOUND=return]` stops `.local` queries from leaking on to unicast DNS servers |
+| `dns` | Classic resolver via `/etc/resolv.conf`; last resort in the chain |
+
+In normal operation systemd-resolved answers everything (forwarding to Pi-hole per `resolved.conf.d/unbound.conf`), so the entries after `resolve` form a resilience chain for when resolved is down rather than the everyday path. `.local` service discovery is primarily provided by the Avahi daemon and its tools (`avahi-browse`, `avahi-resolve`), with `mdns4_minimal` supplying glibc-level `.local` lookups in that fallback path.
 
 #### Network Lookup Checks
 
-- dig example.com
+Note: on the appliance itself, always give `dig` an explicit `@server`. Plain `dig example.com` reads `/etc/resolv.conf`, which points at the disabled 127.0.0.53 stub address; glibc applications are unaffected because they resolve through nss-resolve instead.
+
+- dig example.com @127.0.0.1
 - dig example.com @192.168.0.124
 - dig example.com @192.168.0.124#5335
 - or dig example.com @192.168.0.124 -p 5335
-- dig -4 example.com
-- dig -6 example.com
+- dig -4 example.com @127.0.0.1
+- dig -6 example.com @127.0.0.1
 
 ### Workflow Steps and Description
 
@@ -605,7 +687,7 @@ Follow these steps to build the image on the USB host, write it to the SD card, 
 
 2. Run the build script:
    - Execute `./ke-net-screen.sh`.
-   - The full run takes about 15–20 minutes depending on network and device speed.
+   - The full run takes about 15–20 minutes depending on network and device speed. Timings are hardware-dependent and can be considerably lower — a warm rebuild with `--apt-cache` on fast storage completes in a few minutes.
 
 3. Insert the SD card when prompted:
    - At the first prompt during the build, insert the target SD card into the Pi.

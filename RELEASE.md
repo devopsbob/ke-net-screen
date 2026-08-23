@@ -22,7 +22,7 @@ This validates:
 
 - Bash syntax in critical scripts (ke-net-screen.sh, dns-health-check.sh)
 - No hardcoded Pi-hole password in layer definitions
-- SSH hardening policy baseline (PasswordAuthentication yes, PermitRootLogin no, strong ciphers, public key auth)
+- SSH hardening policy baseline (password and public-key auth both accepted, no root login, no keyboard-interactive, strong ciphers/KEX/MACs; key-only mode is deliberately not enforced — see the commented directives in the policy file)
 - Environment template contract (.env.example contains PIHOLE_PASSWORD)
 - Preflight prerequisites (commands, free disk, network)
 
@@ -37,7 +37,7 @@ grep -R --line-number "pihole setpassword Ch@ngeM3" layer || true
 Build artifacts without flashing media:
 
 ```bash
-# sudo password required for device actions
+# runs rootless; sudo is only a last-resort cleanup fallback
 ./ke-net-screen.sh --build-only
 ```
 
@@ -62,7 +62,7 @@ grep -q "check_sysctl_min\|check_cpu_governor\|check_unbound_cache_stats" home/s
 Key metrics to establish baseline post-deployment:
 
 - Kernel buffer sizes (`net.core.rmem_max`, `net.core.wmem_max`)
-- CPU governor state (performance vs. powersave)
+- CPU governor state (expected: `schedutil`, set via `cpufreq.default_governor=` in cmdline.txt)
 - Unbound cache hit/miss ratios
 
 ## 4. Validate Artifact Metadata
@@ -71,23 +71,30 @@ Key metrics to establish baseline post-deployment:
 ./scripts/validate-deploy-artifacts.sh
 ```
 
-This validates all 10 required artifacts exist:
+This checks the newest `ke-net-screen-build/deploy-*/` directory for:
 
-- `deployed.json` – Deployment metadata
-- `config.yaml.zst` – Compressed config
-- `image.json.zst` – Compressed image metadata
-- `manifest.zst` – Compressed manifest
-- `filesystem-*.sbom.zst` – Compressed software bill of materials
-- `*.img.sparse.zst` – Compressed sparse image (bootable)
-- `boot.vfat.sparse.zst` – Compressed boot partition
-- `root.ext4.sparse.zst` – Compressed root filesystem
+- Required named files: `deployed.json`, `config.yaml.zst`, `image.json.zst`, `manifest.zst`
+- At least one compressed image artifact (`*.img.zst`)
+- At least one compressed SBOM (`*.sbom.zst`)
+
+The deploy directory also contains `boot.vfat.sparse.zst`, `root.ext4.sparse.zst`,
+`*.img.sparse.zst`, and the IDP `*.tar.zst` bundle; these are produced by the
+build but not currently gated by the validator.
+
+Note: after a `--source-unbound` build, the SBOM's `unbound` entry is rewritten
+with the real source version and VCS reference
+(`scripts/patch-sbom-source-unbound.sh`), and `deployed.json` is refreshed so
+the recorded size/sha1 still match.
 
 Confirm deploy metadata exists and checksums are recorded before release publication.
 
 ## 5. Tag and Publish
 
 1. Update changelog notes in your release description.
-2. Create and push an annotated tag:
+2. Commit submodule pin updates so the tag records the exact build inputs
+   (`rpi-image-gen`, `vendors/pi-hole`, `vendors/unbound`) — the working tree,
+   including submodule pointers, should be clean before tagging.
+3. Create and push an annotated tag:
 
 ```bash
 git tag -a vX.Y.Z -m "Release vX.Y.Z"
@@ -128,6 +135,7 @@ If a release is bad:
 - Set `PIHOLE_PASSWORD` in `.env` before build (takes precedence over command line).
 - If `.env` is not present, set via command line with leading space: `PIHOLE_PASSWORD='Ch@ngeM3' ./ke-net-screen.sh` to avoid shell history.
 - Treat built images as sensitive until first boot completes because the initial Pi-hole password is present in a one-time boot-partition secret file.
+- Treat build logs and `deploy-*/config.yaml.zst` as sensitive too: rpi-image-gen prints the resolved configuration (including the device password) into the build output, and the stored deploy config carries it as well. Do not share or upload either.
 - Use `--preflight` before every release build.
 - Only flash to a device after explicit path verification.
 
@@ -137,8 +145,9 @@ This release includes verified security and performance improvements:
 
 **Security Enhancements:**
 
-- SSH hardening policy enforces public key authentication, no root login, strong ciphers (ChaCha20-Poly1305, AES-GCM).
+- SSH hardening policy: no root login, LAN-only ListenAddress, strong ciphers (ChaCha20-Poly1305, AES-GCM). Password and public-key authentication are both accepted; key-only mode is deferred (see the commented directives in the policy file).
 - Baseline validation checks SSH policy during pre-release gate.
+- Source-built Unbound is protected from package-manager overwrite by local dpkg diversions, and the deploy SBOM is corrected to record the real source version.
 
 **Performance Observability:**
 

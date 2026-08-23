@@ -31,8 +31,12 @@ grep -q '^PermitRootLogin no$' "$SSH_POLICY_FILE"
 grep -q '^PasswordAuthentication yes$' "$SSH_POLICY_FILE"
 grep -q '^KbdInteractiveAuthentication no$' "$SSH_POLICY_FILE"
 grep -q '^ChallengeResponseAuthentication no$' "$SSH_POLICY_FILE"
-grep -q '^PubkeyAuthentication yes$' "$SSH_POLICY_FILE"
-grep -q '^AuthenticationMethods publickey$' "$SSH_POLICY_FILE"
+# Key-only mode is deliberately NOT enforced: password auth stays enabled
+# because key-only settings caused remote-login failures that are not yet
+# fully debugged. The pubkey directives remain present but commented in the
+# policy file for reference; assert that state so drift is caught either way.
+grep -q '^# PubkeyAuthentication yes$' "$SSH_POLICY_FILE"
+grep -q '^# AuthenticationMethods publickey$' "$SSH_POLICY_FILE"
 
 # Ensure layer wiring includes the hardened SSH drop-in.
 echo "[check] ssh hardening policy is wired into active layer"
